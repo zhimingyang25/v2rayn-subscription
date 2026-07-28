@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           ruby <<'RUBY'
           require 'base64'
-          require 'cgi'
+          require 'json'
           require 'open-uri'
           require 'yaml'
 
@@ -37,11 +37,17 @@ jobs:
           links = proxies.filter_map do |proxy|
             next unless proxy['type'] == 'http' && proxy['server'] && proxy['port']
 
-            escape = ->(value) { CGI.escape(value.to_s).tr('+', '%20') }
-            user = proxy['username'].to_s
-            password = proxy['password'].to_s
-            auth = user.empty? ? '' : "#{escape.call(user)}:#{escape.call(password)}@"
-            "http://#{auth}#{proxy['server']}:#{proxy['port']}##{escape.call(proxy['name'])}"
+            profile = {
+              'ConfigType' => 10,
+              'ConfigVersion' => 4,
+              'Remarks' => proxy['name'].to_s,
+              'Address' => proxy['server'].to_s,
+              'Port' => proxy['port'].to_i,
+              'Password' => proxy['password'].to_s,
+              'Username' => proxy['username'].to_s
+            }
+            encoded = Base64.urlsafe_encode64(JSON.generate(profile), padding: false)
+            "v2rayn://http/#{encoded}"
           end
 
           abort 'No HTTP proxy nodes found in the upstream subscription.' if links.empty?
