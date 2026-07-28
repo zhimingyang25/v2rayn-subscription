@@ -1,0 +1,57 @@
+name: Refresh v2rayN subscription
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub schedules can be delayed at the top of an hour.
+    - cron: "7 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: subscription-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Start subconverter
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --rm --name subconverter --publish 25500:25500 tindy2013/subconverter:latest
+          for attempt in {1..15}; do
+            if curl --fail --silent 'http://127.0.0.1:25500/version' >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs subconverter
+          exit 1
+
+      - name: Convert the upstream Clash subscription
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p subscriptions
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 \
+            --get 'http://127.0.0.1:25500/sub' \
+            --data-urlencode 'target=v2ray' \
+            --data-urlencode 'url=https://raw.githubusercontent.com/TopChina/proxy-list/refs/heads/main/clash_sub.yaml' \
+            --output subscriptions/v2rayn.txt
+          test -s subscriptions/v2rayn.txt
+
+      - name: Commit changed subscription
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add subscriptions/v2rayn.txt
+          git diff --cached --quiet || git commit -m 'chore: refresh v2rayN subscription'
+          git push
