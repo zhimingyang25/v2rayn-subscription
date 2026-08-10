@@ -3,7 +3,6 @@ name: Refresh v2rayN subscription
 on:
   workflow_dispatch:
   schedule:
-    # GitHub schedules can be delayed at the top of an hour.
     - cron: "7 * * * *"
 
 permissions:
@@ -17,44 +16,24 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Generate v2rayN HTTP subscription from the Clash YAML
+      - name: Mirror upstream subscription
         shell: bash
         run: |
           set -euo pipefail
-          ruby <<'RUBY'
-          require 'base64'
-          require 'json'
-          require 'open-uri'
-          require 'yaml'
-
-          source_url = 'https://raw.githubusercontent.com/TopChina/proxy-list/refs/heads/main/clash_sub.yaml'
-          document = URI.open(source_url, 'User-Agent' => 'v2rayn-subscription').read
-          proxies = YAML.safe_load(document, aliases: true).fetch('proxies', [])
-
-          links = proxies.filter_map do |proxy|
-            next unless proxy['type'] == 'http' && proxy['server'] && proxy['port']
-
-            profile = {
-              'ConfigType' => 10,
-              'ConfigVersion' => 4,
-              'Remarks' => proxy['name'].to_s,
-              'Address' => proxy['server'].to_s,
-              'Port' => proxy['port'].to_i,
-              'Password' => proxy['password'].to_s,
-              'Username' => proxy['username'].to_s
-            }
-            encoded = Base64.urlsafe_encode64(JSON.generate(profile), padding: false)
-            "v2rayn://http/#{encoded}"
-          end
-
-          abort 'No HTTP proxy nodes found in the upstream subscription.' if links.empty?
-          Dir.mkdir('subscriptions') unless Dir.exist?('subscriptions')
-          File.write('subscriptions/v2rayn.txt', Base64.strict_encode64(links.join("\n")))
-          RUBY
-          test -s subscriptions/v2rayn.txt
+          mkdir -p subscriptions
+          curl --fail --silent --show-error --retry 3 \
+            'https://234.qzz.io/fsllist64' \
+            -o subscriptions/v2rayn.txt
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          content = Path("subscriptions/v2rayn.txt").read_text().strip()
+          if not content:
+              raise SystemExit("Empty upstream subscription")
+          base64.b64decode(content, validate=True)
+          PY
 
       - name: Commit changed subscription
         shell: bash
