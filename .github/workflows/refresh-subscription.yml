@@ -52,6 +52,7 @@ jobs:
               profile = {
                   "ConfigVersion": 4,
                   "ConfigType": 10,
+                  "CoreType": 24,
                   "Remarks": unquote(parsed.fragment) or f"{parsed.hostname}:{parsed.port}",
                   "Address": parsed.hostname,
                   "Port": parsed.port,
