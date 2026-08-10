@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Mirror upstream subscription
+      - name: Mirror and convert upstream subscription
         shell: bash
         run: |
           set -euo pipefail
@@ -28,19 +28,54 @@ jobs:
             -o subscriptions/v2rayn.txt
           python3 - <<'PY'
           import base64
+          import json
           from pathlib import Path
-          content = Path("subscriptions/v2rayn.txt").read_text().strip()
-          if not content:
+          from urllib.parse import parse_qs, unquote, urlsplit
+
+          source = Path("subscriptions/v2rayn.txt").read_text().strip()
+          if not source:
               raise SystemExit("Empty upstream subscription")
-          base64.b64decode(content, validate=True)
+          decoded = base64.b64decode(source, validate=True).decode("utf-8")
+          converted = []
+          for line in decoded.splitlines():
+              line = line.strip()
+              if not line:
+                  continue
+              parsed = urlsplit(line)
+              if parsed.scheme.lower() != "https":
+                  converted.append(line)
+                  continue
+              if not parsed.hostname or not parsed.port:
+                  raise SystemExit(f"Invalid HTTPS proxy: {line}")
+              query = parse_qs(parsed.query)
+              insecure = query.get("allowInsecure", ["0"])[0].lower() in {"1", "true", "yes"}
+              profile = {
+                  "ConfigVersion": 4,
+                  "ConfigType": 10,
+                  "Remarks": unquote(parsed.fragment) or f"{parsed.hostname}:{parsed.port}",
+                  "Address": parsed.hostname,
+                  "Port": parsed.port,
+                  "Username": unquote(parsed.username or ""),
+                  "Password": unquote(parsed.password or ""),
+                  "StreamSecurity": "tls",
+                  "Sni": query.get("sni", [""])[0],
+                  "AllowInsecure": "true" if insecure else "false",
+              }
+              encoded = base64.urlsafe_b64encode(
+                  json.dumps(profile, ensure_ascii=False, separators=(",", ":")).encode()
+              ).decode().rstrip("=")
+              converted.append(f"v2rayn://http/{encoded}")
+          Path("subscriptions/v2rayn-tls-http.txt").write_text(
+              base64.b64encode("\n".join(converted).encode()).decode() + "\n"
+          )
           PY
 
-      - name: Commit changed subscription
+      - name: Commit changed subscriptions
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add subscriptions/v2rayn.txt
+          git add subscriptions/v2rayn.txt subscriptions/v2rayn-tls-http.txt
           git diff --cached --quiet || git commit -m 'chore: refresh v2rayN subscription'
           git push
